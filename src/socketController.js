@@ -4,6 +4,7 @@ import { chooseWord } from "./words";
 let sockets = [];
 let inProgress = false;
 let word = null;
+let leader = null;
 
 const chooseLeader = () => sockets[Math.floor(Math.random() * sockets.length)];
 
@@ -15,16 +16,29 @@ const socketController = (socket, io) => {
     const startGame = () => {
         if (inProgress === false) {
             inProgress = true;
-            const leader = chooseLeader();
+            leader = chooseLeader();
             word = chooseWord();
-            io.to(leader.id).emit(events.leaderNotif, { word });
-            superBroadcast(events.gameStarted);
+            superBroadcast(events.gameStarting);
+            setTimeout(() => {
+                superBroadcast(events.gameStarted);
+                io.to(leader.id).emit(events.leaderNotif, { word });
+            }, 5000);
         }
     };
     const endGame = () => {
         inProgress = false;
+        superBroadcast(events.gameEnded);
     };
-
+    const addPoints = id => {
+        sockets = sockets.map(socket => {
+            if (socket.id === id) {
+                socket.points += 10;
+            }
+            return socket;
+        });
+        sendPlayerUpdate();
+        endGame();
+    };
     socket.on(events.setNickname, ({ nickname }) => {
         socket.nickname = nickname;
         sockets.push({ id: socket.id, points: 0, nickname: nickname });
@@ -39,13 +53,25 @@ const socketController = (socket, io) => {
         sockets = sockets.filter(aSocket => aSocket.id !== socket.id);
         if (sockets.length === 1) {
             endGame();
+        } else if (leader) {
+            if (leader.id === socket.id) {
+                endGame();
+            }
         }
         broadcast(events.disconnected, { nickname: socket.nickname });
         sendPlayerUpdate();
     });
-    socket.on(events.sendMsg, ({ message }) =>
-        broadcast(events.newMsg, { message, nickname: socket.nickname })
-    );
+    socket.on(events.sendMsg, ({ message }) => {
+        if (message === word) {
+            superBroadcast(events.newMsg, {
+                message: `Winner is ${socket.nickname}, word was: ${word}`,
+                nickname: "Bot"
+            });
+            addPoints(socket.id);
+        } else {
+            broadcast(events.newMsg, { message, nickname: socket.nickname });
+        }
+    });
     socket.on(events.beginPath, ({ x, y }) =>
         broadcast(events.beganPath, { x, y })
     );
